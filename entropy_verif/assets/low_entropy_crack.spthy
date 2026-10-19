@@ -1,0 +1,30 @@
+theory LOW_ENTROPY_CRACK
+begin
+
+rule orcale_message_derive1 [color=#f8df72]:
+    [ !MDerive0(combine(m1, m2), fm), In(m2)]
+    --[CrackDeriveV(fm)]-> 
+    [ !MDerive0(m1, fm) ]
+
+rule orcale_message_derive2 [color=#f8df72]:
+    [ !MDerive0(combine(m1, m2), fm), In(m1) ]
+    --[CrackDeriveV(fm)]->
+    [ !MDerive0(m2, fm) ]
+
+
+rule orcale_message_valve [color=#f8df72]:
+    [ !MDerive0(m, fm) ]
+    --[]->
+    [ !MDerive1(m, fm) ]
+
+rule orcale_message_propagate [color=#f8df72]:
+    [ !MDerive1(m1, m2), !MDerive1(m2, m3) ]
+    --[CrackPropagateV(m1), CrackPropagateV(m3)]->
+    [ !MDerive1(m1, m3) ]
+
+rule bf_low_entropy_message [color=#f8df72]:
+    [ !EntropyLow(m), !MDerive1(m, fm), In(fm) ]
+    --[]->
+    [ Out(m) ]
+
+end

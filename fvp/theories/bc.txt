@@ -1,0 +1,39 @@
+N1/0.
+N2/0.
+N3/0.
+N4/0.
+TRUE/0.
+FALSE/0.
+SECURE_AU/0.
+LEGACY_AU/0.
+pair/2.
+left/1.
+right/1.
+combine/2.
+decombine/1.
+SelectAU/2.
+SelectKS/2.
+resize/2.
+
+N1 < N2 < N3 < N4 < TRUE < FALSE < SECURE_AU < LEGACY_AU < pair < left < right < combine < decombine < SelectAU < SelectKS < resize.
+
+=== Equational Theory
+
+decombine(combine(x,y)) = pair(x,y).
+
+SelectAU(x,FALSE) = LEGACY_AU.
+SelectAU(FALSE,x) = LEGACY_AU.
+SelectAU(TRUE,TRUE) = SECURE_AU.
+
+SelectKS(x,x) = x.
+SelectKS(N1,x) = N1.
+SelectKS(x,N1) = N1.
+SelectKS(N2,N3) = N2.
+SelectKS(N3,N2) = N2.
+SelectKS(x,N4) = x.
+SelectKS(N4,x) = x.
+
+resize(m,N1) = left(left(m)).
+resize(m,N2) = combine(left(left(m)),right(left(m))).
+resize(m,N3) = combine(combine(left(left(m)),right(left(m))),left(right(m))).
+resize(m,N4) = combine(combine(left(left(m)),right(left(m))),combine(left(right(m)),right(right(m)))).

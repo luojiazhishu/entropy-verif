@@ -1,0 +1,66 @@
+# EntropyVerif environment for the bc / ble / wpa2 case studies.
+#
+#   tamarin-prover 1.8.0
+#   Maude          2.7.1
+#   Python         3.12
+#   C toolchain (gcc / make / flex / bison / m4) + graphviz
+#
+# These are the versions the archived results in case_studies/bc,
+# case_studies/ble and case_studies/wpa2 were produced with.
+#
+#   docker build -t entropyverif:1.8 -f docker/Dockerfile.tamarin1.8 docker/
+#   docker run -it --rm -v "$(pwd)":/workspace -p 3001:3001 entropyverif:1.8
+#
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LC_ALL=C.UTF-8 \
+    LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        flex \
+        bison \
+        m4 \
+        python3 \
+        graphviz \
+        ca-certificates \
+        curl \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# libtinfo5
+# ---------------------------------------------------------------------------
+RUN echo "deb http://archive.ubuntu.com/ubuntu jammy universe" \
+        > /etc/apt/sources.list.d/jammy.list \
+ && printf 'Package: *\nPin: release n=jammy\nPin-Priority: 100\n' \
+        > /etc/apt/preferences.d/99-jammy \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends libtinfo5 \
+ && rm -f /etc/apt/sources.list.d/jammy.list /etc/apt/preferences.d/99-jammy \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Maude 2.7.1
+# ---------------------------------------------------------------------------
+ENV MAUDE_LIB=/opt/maude
+RUN curl -fsSL -o /tmp/maude.zip \
+      https://github.com/SRI-CSL/Maude/releases/download/Maude2.7.1/Maude-2.7.1-linux.zip \
+ && mkdir -p ${MAUDE_LIB} /tmp/maude \
+ && unzip -q /tmp/maude.zip -d /tmp/maude \
+ && cp /tmp/maude/*.maude ${MAUDE_LIB}/ \
+ && install -m 0755 /tmp/maude/maude.linux64 /usr/local/bin/maude \
+ && rm -rf /tmp/maude.zip /tmp/maude
+
+# ---------------------------------------------------------------------------
+# tamarin-prover 1.8.0
+# ---------------------------------------------------------------------------
+RUN curl -fsSL \
+      https://github.com/tamarin-prover/tamarin-prover/releases/download/1.8.0/tamarin-prover-1.8.0-linux64-ubuntu.tar.gz \
+    | tar -xz -C /usr/local/bin tamarin-prover \
+ && chmod 0755 /usr/local/bin/tamarin-prover
+
+EXPOSE 3001
+WORKDIR /workspace
+CMD ["/bin/bash"]

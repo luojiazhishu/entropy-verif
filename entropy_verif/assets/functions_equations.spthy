@@ -1,0 +1,9 @@
+theory UTILS
+begin
+
+functions: combine/2, decombine/1
+
+equations:
+    decombine(combine(m1, m2)) = <m1, m2>
+
+end

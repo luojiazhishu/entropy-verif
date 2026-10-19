@@ -1,0 +1,612 @@
+theory Alipay_Order_Code_Model
+begin
+
+heuristic: S
+
+    builtins: signing, hashing
+
+    functions: gen_desc/1, calc_amt/1, combine/2, decombine/1
+
+
+  tactic: default
+    presort: S
+    prio:
+      regex ".*Commit.*"
+    prio:
+      regex ".*!KU\(.*m_sk.*"
+    prio:
+      regex ".*m_sk.*"
+    prio:
+      regex ".*_State.*"
+    prio:
+      regex ".*sign.*"
+    prio:
+      regex ".*APS_PubKey.*"
+    prio:
+      regex ".*SOut\(.*U-.*"
+    prio:
+      regex ".*SOut\(.*-APS.*"
+    prio:
+      regex ".*SIn\(.*U-.*"
+    prio:
+      regex ".*SIn\(.*-APS.*"
+    deprio:
+      regex ".*!KU\(.*session.*"
+
+  tactic: typing
+    presort: S
+    prio:
+      regex ".*!KU\(\s*sign.*"
+    prio:
+      regex ".*SOURCE_.*"
+    prio:
+      regex ".*APS_PubKey.*"
+    prio:
+      regex ".*SOut\(.*U-.*"
+    prio:
+      regex ".*SOut\(.*-APS.*"
+    prio:
+      regex ".*SIn\(.*U-.*"
+    prio:
+      regex ".*SIn\(.*-APS.*"
+    prio:
+      regex ".*_State.*"
+    deprio:
+      regex ".*SOut*"
+    deprio:
+      regex ".*SIn*"
+
+  restriction OnlyOnceV:
+    "
+    All x #i #j. OnlyOnceV(x)@#i & OnlyOnceV(x)@#j ==> #i = #j
+    "
+
+  restriction Equality:
+    "All x y #i. Eq(x,y) @#i ==> x = y"
+
+  restriction Inequality:
+    "All x #i. Neq(x,x) @i ==> F"
+
+  restriction InsecureChannel:
+    "
+    All ch_id #i. InsecureChannel(ch_id) @#i ==>
+      (ch_id = 'PW-APA' | ch_id = 'PW-MS')
+    "
+
+    rule SecureChannelSendRecv [color=#F0F5E5]:
+        [
+            SOut(ch_id, ~session, $src, $dst, msg)
+        ]
+        --[
+            Neq($src, $dst)
+        ]->
+        [
+            SIn(ch_id, ~session, $src, $dst, msg)
+        ]
+
+    rule breakChannelConfidentiality [color=#FCCB16]:
+        [
+            SOut(ch_id, ~session, $src, $dst, msg)
+        ]
+        --[
+            OnlyOnceV(<$src, $dst, msg>),
+            BreakChannelCon(ch_id),
+            InsecureChannel(ch_id),
+            SOURCE_IN_FACT_BkChaCon(ch_id, ~session, $src, $dst, msg)
+        ]->
+        [
+            SOut(ch_id, ~session, $src, $dst, msg),
+            Out(<$src, $dst, msg>)
+        ]
+
+    rule breakChannelIntegrity [color=#F25A47]:
+        [
+            In(<ch_id, ~session, $src, $dst, msg>)
+        ]
+        --[
+            BreakChannelInt(ch_id),
+            InsecureChannel(ch_id),
+            SOURCE_OUT_FACT_BkChaInt(ch_id, ~session, $src, $dst, msg),
+            SOURCE_OUT_FACT_APA_QRCODE(msg)
+        ]->
+        [
+            SIn(ch_id, ~session, $src, $dst, msg)
+        ]
+
+    rule OrderCreateOracle [color=#F9D27D]:
+        let
+            qr_code = <total_amount, subject, ~trade_no>
+        in
+        [
+            Fr(~trade_no),
+            Fr(~out_trade_no),
+            In(<total_amount, subject>),
+            !APS_PubKey($aps_id, a_pk),
+            !MerchantRegistered(<$ms_id, ~app_id, m_pk>)
+        ]
+        --[
+            SOURCE_OUT_FACT_MS_QRCODE(qr_code)
+        ]->
+        [
+            Out(qr_code),
+            !MS_Database($ms_id, $attacker, qr_code, ~out_trade_no),
+            !APS_Database($aps_id, qr_code, ~out_trade_no),
+            !MDerive0(combine(~trade_no, combine(subject, total_amount)), qr_code),
+            !MDerive0(combine(~trade_no, combine(subject, total_amount)), qr_code),
+            !MDerive0(combine(~trade_no, combine(subject, total_amount)), qr_code)
+        ]
+
+    rule PaymentQueryOracle [color=#F9D27D]:
+        let
+            qr_code = <total_amount, subject, ~trade_no>
+        in
+        [
+            In(qr_code),
+            !APS_Database($aps_id, qr_code, ~out_trade_no)
+        ]
+        -->
+        [
+            Out(<total_amount, subject>)
+        ]
+
+    rule CreateAPS [color=#D3C3F3]:
+        [
+            Fr(~a_sk)
+        ]
+        --[
+            OnlyOnceV('APS')
+        ]->
+        [
+            !APS_PriKey($aps_id, ~a_sk),
+            !APS_PubKey($aps_id, pk(~a_sk)),
+            !MDerive0(~a_sk, pk(~a_sk))
+        ]
+
+    rule CreateAPA [color=#C4C3F3]:
+        []
+        --[
+            OnlyOnceV(<'APA', $apa_id>)
+        ]->
+        [
+            APA_State('created', 'null', <$apa_id>)
+        ]
+
+    rule CreatePW [color=#F3C3C7]:
+        []
+        --[
+            OnlyOnceV(<'PW', $pw_id>)
+        ]->
+        [
+            PW_State('created', 'null', <$pw_id>)
+        ]
+
+    rule CreateU [color=#C5F3C3]:
+        [
+            Fr(~password)
+        ]
+        --[
+            OnlyOnceV(<'U'>)
+        ]->
+        [
+            !UserRegistered(<$u_id, h(~password)>),
+            !UserPassword(<$u_id, ~password>),
+            !MDerive0(~password, h(~password)),
+            !EntropyLow(~password)
+        ]
+
+    rule CreateMS [color=#F3CCC3]:
+        [
+            Fr(~app_id),
+            Fr(~m_sk)
+        ]
+        --[
+            OnlyOnceV(<'MS', $ms_id>)
+        ]->
+        [
+            !MerchantRegistered(<$ms_id, ~app_id, pk(~m_sk)>),
+            !MerchantCreated(<$ms_id, ~app_id, $notify_url, ~m_sk>),
+            !MDerive0(~m_sk, pk(~m_sk))
+        ]
+
+    rule NewPaymentSession [color=#D0DEAA]:
+        [
+            Fr(~session),
+            !APS_PriKey($aps_id, ~a_sk),
+            !UserPassword(<$u_id, ~password>),
+            !MerchantCreated(<$ms_id, ~app_id, $notify_url, ~m_sk>),
+            PW_State('created', 'null', <$pw_id>),
+            APA_State('created', 'null', <$apa_id>)
+        ]
+        --[
+            Start(~session, $u_id, $pw_id, $ms_id, $apa_id, $aps_id),
+            OnlyOnceV(<$u_id, $pw_id, $ms_id, $apa_id, $aps_id>)
+        ]->
+        [
+            U_State('init', ~session, <$u_id, $pw_id, $apa_id, $aps_id, $ms_id, ~password>),
+            PW_State('init', ~session, <$pw_id, $u_id, $ms_id, $apa_id>),
+            MS_State('init', ~session, <$ms_id, $pw_id, $aps_id, $u_id, ~app_id, ~m_sk>),
+            APA_State('init', ~session, <$apa_id, $u_id, $pw_id, $aps_id>),
+            APS_State('init', ~session, <$aps_id, $apa_id, $ms_id, $u_id, ~a_sk>),
+            Out(~session)
+        ]
+
+    rule UOpenAndOrderPW:
+        [
+            Fr(~goods),
+            U_State('init', ~session, <$u_id, $pw_id, $apa_id, $aps_id, $ms_id, ~password>)
+        ]
+        -->
+        [
+            U_State('ordered', ~session, <$u_id, $pw_id, $apa_id, $aps_id, $ms_id, ~password, ~goods>),
+            SOut('U-PW', ~session, $u_id, $pw_id, <'OpenAppAndOrder', ~goods>)
+        ]
+
+    rule PWOrderMS:
+        [
+            SIn('U-PW', ~session, $u_id, $pw_id, <'OpenAppAndOrder', ~goods>),
+            PW_State('init', ~session, <$pw_id, $u_id, $ms_id, $apa_id>)
+        ]
+        --[
+            Finish('PW', ~session, $pw_id),
+            SOURCE_OUT_FACT_BkChaCon('PW-MS', ~session, $pw_id, $ms_id, ~goods)
+        ]->
+        [
+            SOut('PW-MS', ~session, $pw_id, $ms_id, ~goods),
+            PW_State('ordered', ~session, <$pw_id, $u_id, $ms_id, $apa_id>)
+        ]
+
+    rule MSPrecreateAPS:
+        let
+            subject = gen_desc(~goods)
+            total_amount = calc_amt(~goods)
+            biz_content = <~out_trade_no, total_amount, subject, 'QR_CODE_OFFLINE'>
+            m_sig = sign(<~app_id, biz_content>, ~m_sk)
+            order_str = <~app_id, biz_content, m_sig>
+        in
+        [
+            SIn('PW-MS', ~session, $pw_id, $ms_id, ~goods),
+            MS_State('init', ~session, <$ms_id, $pw_id, $aps_id, $u_id, ~app_id, ~m_sk>),
+            Fr(~out_trade_no)
+        ]
+        --[
+            SOURCE_OUT_FACT_BkChaCon('MS-APS', ~session, $ms_id, $aps_id, order_str),
+            SOURCE_OUT_FACT_M_SIGN('MS-APS', ~session, $ms_id, $aps_id, order_str),
+            MS_Running('PSAuthMS', $ms_id, $aps_id, order_str)
+        ]->
+        [
+            SOut('MS-APS', ~session, $ms_id, $aps_id, order_str),
+            MS_State('precreating', ~session, <$ms_id, $pw_id, $aps_id, $u_id, ~app_id, ~m_sk, ~out_trade_no>),
+            !MDerive0(combine(m_sig, combine(~app_id, biz_content)), order_str),
+            !MDerive0(combine(~app_id, combine(~m_sk, biz_content)), m_sig),
+            !MDerive0(combine(subject, combine(~out_trade_no, total_amount)), biz_content),
+            !MDerive0(~goods, subject),
+            !MDerive0(~goods, total_amount)
+        ]
+
+    rule APSGenerateQRCodeMS:
+        let
+            biz_content = <~out_trade_no, total_amount, subject, 'QR_CODE_OFFLINE'>
+            order_str = <~app_id, biz_content, m_sig>
+            veri_result = verify(m_sig, <~app_id, biz_content>, m_pk)
+            qr_code = <total_amount, subject, ~trade_no>
+        in
+        [
+            SIn('MS-APS', ~session, $ms_id, $aps_id, order_str),
+            APS_State('init', ~session, <$aps_id, $apa_id, $ms_id, $u_id, ~a_sk>),
+            !MerchantRegistered(<$ms_id, ~app_id, m_pk>),
+            Fr(~trade_no)
+        ]
+        --[
+            Eq(veri_result, true),
+            SOURCE_IN_FACT_M_SIGN('MS-APS', ~session, $ms_id, $aps_id, order_str),
+            SOURCE_OUT_FACT_MS_QRCODE(qr_code),
+            PS_Commit('PSAuthMS', $aps_id, $ms_id, order_str)
+        ]->
+        [
+            SOut('MS-APS', ~session, $aps_id, $ms_id, qr_code),
+            !APS_Database($aps_id, qr_code, ~out_trade_no),
+            APS_State('precreated', ~session, <$aps_id, $apa_id, $ms_id, $u_id, ~a_sk>),
+            !MDerive0(combine(~trade_no, combine(subject, total_amount)), qr_code),
+            !MDerive0(combine(~trade_no, combine(subject, total_amount)), qr_code)
+        ]
+
+    rule MSSendQRCodePW:
+        let
+            qr_code = <total_amount, subject, ~trade_no>
+        in
+        [
+            SIn('MS-APS', ~session, $aps_id, $ms_id, qr_code),
+            MS_State('precreating', ~session, <$ms_id, $pw_id, $aps_id, $u_id, ~app_id, ~m_sk, ~out_trade_no>)
+        ]
+        --[
+            SOURCE_OUT_FACT_BkChaCon('PW-MS', ~session, $ms_id, $pw_id, qr_code),
+            SOURCE_IN_FACT_MS_QRCODE(qr_code),
+            SOURCE_OUT_FACT_APA_QRCODE(qr_code),
+            MS_Running('UAuthMS', $ms_id, $u_id, ~trade_no)
+        ]->
+        [
+            SOut('PW-MS', ~session, $ms_id, $pw_id, qr_code),
+            !MS_Database($ms_id, $u_id, qr_code, ~out_trade_no),
+            MS_State('qrcodesent', ~session, <$ms_id, $pw_id, $aps_id, $u_id, ~app_id, ~m_sk>)
+        ]
+
+    rule PWShowQRCodeAPA:
+        let
+            qr_code = <total_amount, subject, ~trade_no>
+        in
+        [
+            SIn('PW-MS', ~session, $ms_id, $pw_id, qr_code),
+            PW_State('ordered', ~session, <$pw_id, $u_id, $ms_id, $apa_id>)
+        ]
+        --[
+            SOURCE_OUT_FACT_BkChaCon('PW-APA', ~session, $pw_id, $apa_id, qr_code),
+            SOURCE_IN_FACT_APA_QRCODE(qr_code)
+        ]->
+        [
+            SOut('PW-APA', ~session, $pw_id, $apa_id, qr_code),
+            PW_State('qrcodeshown', ~session, <$pw_id, $u_id, $ms_id, $apa_id>)
+        ]
+
+    rule APAScanAndReqPwdU:
+        let
+            qr_code = <total_amount, subject, ~trade_no>
+        in
+        [
+            SIn('PW-APA', ~session, $pw_id, $apa_id, qr_code),
+            APA_State('init', ~session, <$apa_id, $u_id, $pw_id, $aps_id>)
+        ]
+        -->
+        [
+            SOut('U-APA', ~session, $apa_id, $u_id, <'AReqPwd', total_amount, subject, ~trade_no>),
+            APA_State('waitpwd', ~session, <$apa_id, $u_id, $pw_id, $aps_id, qr_code>)
+        ]
+
+    rule USubmitPasswordAPA:
+        let
+            subject = gen_desc(~goods)
+            total_amount = calc_amt(~goods)
+        in
+        [
+            SIn('U-APA', ~session, $apa_id, $u_id, <'AReqPwd', total_amount, subject, ~trade_no>),
+            U_State('ordered', ~session, <$u_id, $pw_id, $apa_id, $aps_id, $ms_id, ~password, ~goods>)
+        ]
+        --[
+            UserInputPwd($u_id, ~password, ~session),
+            U_Commit('UAuthMS', $u_id, $ms_id, ~trade_no)
+        ]->
+        [
+            SOut('U-APA', ~session, $u_id, $apa_id, ~password),
+            U_State('pwdsubmitted', ~session, <$u_id, $pw_id, $apa_id, $aps_id, $ms_id, ~password, ~goods>)
+        ]
+
+    rule APASubmitPasswordAPS:
+        [
+            SIn('U-APA', ~session, $u_id, $apa_id, ~password),
+            APA_State('waitpwd', ~session, <$apa_id, $u_id, $pw_id, $aps_id, qr_code>)
+        ]
+        -->
+        [
+            SOut('APA-APS', ~session, $apa_id, $aps_id, <qr_code, h(~password)>),
+            APA_State('pwdsubmitted', ~session, <$apa_id, $u_id, $pw_id, $aps_id, qr_code>),
+            !MDerive0(~password, h(~password))
+        ]
+
+    rule APSVerifyPasswordAndConfirmAPAMS:
+        let
+            qr_code = <total_amount, subject, ~trade_no>
+            response = <~app_id, ~out_trade_no, ~trade_no, total_amount>
+            res_sign = sign(response, ~a_sk)
+            qr_code = <total_amount, subject, ~trade_no>
+        in
+        [
+            !UserRegistered(<$u_id, pwd_hash>),
+            !MerchantRegistered(<$ms_id, ~app_id, m_pk>),
+            SIn('APA-APS', ~session, $apa_id, $aps_id, <qr_code, pwd_hash>),
+            !APS_Database($aps_id, qr_code, ~out_trade_no),
+            APS_State('precreated', ~session, <$aps_id, $apa_id, $ms_id, $u_id, ~a_sk>)
+        ]
+        --[
+            Finish('APS', ~session, $aps_id),
+            SOURCE_OUT_FACT_RES_SIGN(res_sign),
+            PS_Running('MSAuthPS', $aps_id, $ms_id, response),
+            PS_Running('UAuthPS', $aps_id, $u_id, <total_amount, subject>),
+            PaymentComplete($u_id, pwd_hash, ~session)
+        ]->
+        [
+            SOut('MS-APS', ~session, $aps_id, $ms_id, <response, res_sign>),
+            SOut('APA-APS', ~session, $aps_id, $apa_id, <response, res_sign>),
+            APS_State('confirmed', ~session, <$aps_id, $apa_id, $ms_id, $u_id, ~a_sk>),
+            !MDerive0(combine(~trade_no, combine(~app_id, combine(~out_trade_no, total_amount))), response),
+            !MDerive0(combine(~a_sk, response), res_sign),
+            !MDerive0(combine(~trade_no, combine(~app_id, combine(~out_trade_no, total_amount))), response),
+            !MDerive0(combine(~a_sk, response), res_sign)
+        ]
+
+    rule MSReceiveNotification:
+        let
+            qr_code = <total_amount, subject, ~trade_no>
+            response = <~app_id, ~out_trade_no, ~trade_no, total_amount>
+            veri_result = verify(res_sign, response, a_pk)
+        in
+        [
+            !APS_PubKey($aps_id, a_pk),
+            SIn('MS-APS', ~session, $aps_id, $ms_id, <response, res_sign>),
+            !MS_Database($ms_id, $user, qr_code, ~out_trade_no),
+            MS_State('qrcodesent', ~session, <$ms_id, $pw_id, $aps_id, $u_id, ~app_id, ~m_sk>)
+        ]
+        --[
+            Eq(veri_result, true),
+            Finish('MS', ~session, $ms_id),
+            SOURCE_IN_FACT_RES_SIGN(res_sign),
+            MS_Commit('MSAuthPS', $ms_id, $aps_id, response)
+        ]->
+        [
+            MS_State('completed', ~session, <$ms_id, $pw_id, $aps_id, $u_id, ~app_id, ~m_sk>)
+        ]
+
+    rule APAReceiveConfirmationAndNotifyU:
+        let
+            qr_code = <total_amount, subject, ~trade_no>
+            response = <~app_id, ~out_trade_no, ~trade_no, total_amount>
+            veri_result = verify(res_sign, response, a_pk)
+        in
+        [
+            !APS_PubKey($aps_id, a_pk),
+            SIn('APA-APS', ~session, $aps_id, $apa_id, <response, res_sign>),
+            APA_State('pwdsubmitted', ~session, <$apa_id, $u_id, $pw_id, $aps_id, qr_code>)
+        ]
+        --[
+            Eq(veri_result, true),
+            Finish('APA', ~session, $apa_id),
+            SOURCE_IN_FACT_RES_SIGN(res_sign)
+        ]->
+        [
+            SOut('U-APA', ~session, $apa_id, $u_id, <'PaymentSuccessful', total_amount, subject>),
+            APA_State('completed', ~session, <$apa_id, $u_id, $pw_id, $aps_id, qr_code>)
+        ]
+
+    rule UReceiveNotification:
+        let
+            subject = gen_desc(~goods)
+            total_amount = calc_amt(~goods)
+        in
+        [
+            SIn('U-APA', ~session, $apa_id, $u_id, <'PaymentSuccessful', total_amount, subject>),
+            U_State('pwdsubmitted', ~session, <$u_id, $pw_id, $apa_id, $aps_id, $ms_id, ~password, ~goods>)
+        ]
+        --[
+            Finish('U', ~session, $u_id),
+            U_Commit('UAuthPS', $u_id, $aps_id, <total_amount, subject>)
+        ]->
+        [
+            U_State('completed', ~session, <$u_id, $pw_id, $apa_id, $aps_id, $ms_id, ~password, ~goods>)
+        ]
+
+
+  lemma typing [sources, heuristic={typing}]:
+    "
+      (All m1 m2 m3 m4 m5 #i. SOURCE_IN_FACT_BkChaCon(m1, m2, m3, m4, m5)@#i ==> (Ex #j. SOURCE_OUT_FACT_BkChaCon(m1, m2, m3, m4, m5)@#j & j < i) )
+      & (All m1 m2 m3 m4 m5 #i. SOURCE_IN_FACT_M_SIGN(m1, m2, m3, m4, m5)@#i ==> (Ex #j. SOURCE_OUT_FACT_M_SIGN(m1, m2, m3, m4, m5)@#j & j < i) )
+      & (All m1 #i. SOURCE_IN_FACT_RES_SIGN(m1)@#i ==> (Ex #j. SOURCE_OUT_FACT_RES_SIGN(m1)@#j & j < i) )
+      & (All m1 #i. SOURCE_IN_FACT_MS_QRCODE(m1)@#i ==> (Ex #j. SOURCE_OUT_FACT_MS_QRCODE(m1)@#j & j < i) )
+      & (All m1 #i. SOURCE_IN_FACT_APA_QRCODE(m1)@#i ==> (Ex #j. SOURCE_OUT_FACT_APA_QRCODE(m1)@#j & j < i) )
+    "
+
+  lemma executable [heuristic={default}]:
+    exists-trace
+    "
+      Ex session u_id pw_id ms_id apa_id aps_id #i #j #k #l #m #n. 
+        Start(session, u_id, pw_id, ms_id, apa_id, aps_id)@n
+        & Finish('U', session, u_id)@i 
+        & Finish('PW', session, pw_id)@j 
+        & Finish('MS', session, ms_id)@k
+        & Finish('APA', session, apa_id)@l
+        & Finish('APS', session, aps_id)@m
+    "
+
+  lemma PS_MS_Order_Injective_Agreement [heuristic={default}]:
+    "
+    All ps ms o #i. PS_Commit('PSAuthMS', ps, ms, o)@i ==> (
+      Ex #j. MS_Running('PSAuthMS', ms, ps, o)@j & j < i &
+      not (Ex ps2 ms2 #i2. PS_Commit('PSAuthMS', ps2, ms2, o)@i2 & not(#i2 = #i))
+    )
+    "
+
+  lemma U_MS_Order_Injective_Agreement [heuristic={default}]:
+    "
+    All u ms o #i. U_Commit('UAuthMS', u, ms, o)@i ==> (
+      Ex #j. MS_Running('UAuthMS', ms, u, o)@j & j < i &
+      not (Ex u2 ms2 #i2. U_Commit('UAuthMS', u2, ms2, o)@i2 & not(#i2 = #i))
+    )
+    "
+
+  lemma MS_PS_Response_Injective_Agreement [heuristic={default}]:
+    "
+    All ms ps o #i. MS_Commit('MSAuthPS', ms, ps, o)@i ==> (
+      Ex #j. PS_Running('MSAuthPS', ps, ms, o)@j & j < i &
+      not (Ex ms2 ps2 #i2. MS_Commit('MSAuthPS', ms2, ps2, o)@i2 & not(#i2 = #i))
+    )
+    "
+
+  lemma U_PS_Response_Injective_Agreement [heuristic={default}]:
+    "
+    All u pa r #i. U_Commit('UAuthPS', u, pa, r)@i ==> (
+      Ex #j. PS_Running('UAuthPS', pa, u, r)@j & j < i &
+      not (Ex u2 pa2 #i2. U_Commit('UAuthPS', u2, pa2, r)@i2 & not(#i2 = #i))
+    )
+    "
+
+  lemma No_Payment_Without_Password_Input [heuristic={default}]:
+    "
+    All u p s #i. PaymentComplete(u, h(p), s)@i ==> (
+      Ex #j. UserInputPwd(u, p, s)@j & j < i &
+      not (Ex u2 p2 #i2. PaymentComplete(u2, h(p2), s)@i2 & not(#i2 = #i))
+    )
+    "
+
+    rule orcale_message_derive1 [color=#F8DF72]:
+        [
+            !MDerive0(combine(m1, m2), fm),
+            In(m2)
+        ]
+        --[
+            CrackDeriveV(fm)
+        ]->
+        [
+            !MDerive0(m1, fm)
+        ]
+
+    rule orcale_message_derive2 [color=#F8DF72]:
+        [
+            !MDerive0(combine(m1, m2), fm),
+            In(m1)
+        ]
+        --[
+            CrackDeriveV(fm)
+        ]->
+        [
+            !MDerive0(m2, fm)
+        ]
+
+    rule orcale_message_valve [color=#F8DF72]:
+        [
+            !MDerive0(m, fm)
+        ]
+        -->
+        [
+            !MDerive1(m, fm)
+        ]
+
+    rule orcale_message_propagate [color=#F8DF72]:
+        [
+            !MDerive1(m1, m2),
+            !MDerive1(m2, m3)
+        ]
+        --[
+            CrackPropagateV(m1),
+            CrackPropagateV(m3)
+        ]->
+        [
+            !MDerive1(m1, m3)
+        ]
+
+    rule bf_low_entropy_message [color=#F8DF72]:
+        [
+            !EntropyLow(m),
+            !MDerive1(m, fm),
+            In(fm)
+        ]
+        -->
+        [
+            Out(m)
+        ]
+
+restriction CrackDerive2Times:
+    "All x #i0 #i1 #i2. CrackDeriveV(x)@#i0 & CrackDeriveV(x)@#i1 & CrackDeriveV(x)@#i2 
+        ==> #i0 = #i1 | #i0 = #i2 | #i1 = #i2"
+
+restriction CrackPropagate1Times:
+    "All x #i0 #i1. CrackPropagateV(x)@#i0 & CrackPropagateV(x)@#i1 
+        ==> #i0 = #i1"
+
+end

@@ -1,0 +1,8 @@
+*.log
+log/
+
+# fvpgen checkout created by `make -C fvp check`
+fvp/fvpgen/
+
+# the recorded fvpgen output is evidence, keep it despite the *.log rule above
+!fvp/logs/*.log

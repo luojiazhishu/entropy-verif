@@ -1,0 +1,50 @@
+# EntropyVerif environment for the pay case study.
+#
+#   tamarin-prover 1.10.0
+#   Maude          3.1
+#   Python         3.12
+#   C toolchain (gcc / make / flex / bison / m4) + graphviz
+#
+#   docker build -t entropyverif:1.10 -f docker/Dockerfile.tamarin1.10 docker/
+#   docker run -it --rm -v "$(pwd)":/workspace -p 3001:3001 entropyverif:1.10
+#
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LC_ALL=C.UTF-8 \
+    LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        flex \
+        bison \
+        m4 \
+        python3 \
+        graphviz \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Maude 3.1
+# ---------------------------------------------------------------------------
+RUN echo "deb http://archive.ubuntu.com/ubuntu jammy universe" \
+        > /etc/apt/sources.list.d/jammy.list \
+ && printf 'Package: *\nPin: release n=jammy\nPin-Priority: 100\n' \
+        > /etc/apt/preferences.d/99-jammy \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends maude=3.1-2 \
+ && rm -f /etc/apt/sources.list.d/jammy.list /etc/apt/preferences.d/99-jammy \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# tamarin-prover 1.10.0
+# ---------------------------------------------------------------------------
+RUN curl -fsSL \
+      https://github.com/tamarin-prover/tamarin-prover/releases/download/1.10.0/tamarin-prover-1.10.0-linux64-ubuntu.tar.gz \
+    | tar -xz -C /usr/local/bin tamarin-prover \
+ && chmod 0755 /usr/local/bin/tamarin-prover
+
+EXPOSE 3001
+WORKDIR /workspace
+CMD ["/bin/bash"]
